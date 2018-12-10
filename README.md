@@ -1,2 +1,5 @@
-# evolving-substrate-rs
-Implementation of the Evolving Substrate (ES) algorithm of HyperNEAT-ES in Rust
+# Evolvable Substrate
+
+Implementation of the [Evolvable Substrate (ES)][1] algorithm of ES-HyperNEAT in Rust.
+
+[1]: https://eplex.cs.ucf.edu/ESHyperNEAT/

@@ -1,0 +1,7 @@
+[package]
+name = "evolvable-substrate"
+version = "0.1.0"
+authors = ["Michael Neumann <mneumann@ntecs.de>"]
+edition = "2018"
+
+[dependencies]
