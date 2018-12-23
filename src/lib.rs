@@ -5,7 +5,7 @@ type Num = f32;
 pub struct Config {
     min_depth: usize,
     max_depth: usize,
-    variance_threshold: Num,
+    variance_sq_threshold: Num,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -30,7 +30,8 @@ pub struct QuadPoint {
 }
 
 impl QuadPoint {
-    fn variance(&self) -> Num {
+    /// Returns the variance^2.
+    fn variance_sq(&self) -> Num {
         if let Some(ref children) = self.children {
             let mut mean = 0.0;
             for child in children.iter() {
@@ -42,7 +43,7 @@ impl QuadPoint {
                 let d = child.f_value - mean;
                 variance += d * d;
             }
-            return variance.sqrt();
+            variance
         } else {
             0.0
         }
@@ -83,7 +84,7 @@ fn divide_node(
     ]);
 
     if node.level < config.min_depth
-        || (node.level < config.max_depth && node.variance() > config.variance_threshold)
+        || (node.level < config.max_depth && node.variance_sq() > config.variance_sq_threshold)
     {
         for child in children.iter_mut() {
             child.children = divide_node(f, child, config);
@@ -129,7 +130,7 @@ mod tests {
         let config = Config {
             min_depth: 1,
             max_depth: 1,
-            variance_threshold: 1.0,
+            variance_sq_threshold: 1.0,
         };
         let root = division_and_initialization(&f, &config);
         assert!(!root.is_leaf());
