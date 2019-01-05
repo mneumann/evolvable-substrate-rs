@@ -5,3 +5,7 @@ authors = ["Michael Neumann <mneumann@ntecs.de>"]
 edition = "2018"
 
 [dependencies]
+
+[dev-dependencies]
+splot = {git = "https://github.com/mneumann/splot-rs"}
+image = "0.20"
