@@ -28,8 +28,8 @@ pub struct QuadPoint {
     depth: usize,
     /// The image of the function at (center.x, center.y).
     image: Num,
-    /// Optional subdivisions of this QuadPoint.
-    children: Option<Box<[QuadPoint; 4]>>,
+    /// Subdivisions of this QuadPoint.
+    children: Vec<QuadPoint>,
 }
 
 /// Returns the variance^2.
@@ -48,12 +48,12 @@ enum SubRegion {
 }
 
 impl QuadPoint {
-    pub fn children(&self) -> Option<&[QuadPoint]> {
-        self.children.as_ref().map(|c| &c[..])
+    pub fn children(&self) -> &[QuadPoint] {
+        &self.children[..]
     }
 
     pub fn is_leaf(&self) -> bool {
-        self.children.is_none()
+        self.children.len() == 0
     }
 
     /// Creates a child QuadPoint for the given SubRegion
@@ -73,18 +73,18 @@ impl QuadPoint {
             width: half_width,
             depth: self.depth + 1,
             image: f((x, y)),
-            children: None,
+            children: Vec::new(),
         }
     }
 
     /// Creates four children, one for each SubRegion.
-    fn create_children(&self, f: &impl Fn((Num, Num)) -> Num) -> Box<[QuadPoint; 4]> {
-        Box::new([
+    fn create_children(&self, f: &impl Fn((Num, Num)) -> Num) -> Vec<QuadPoint> {
+        vec![
             self.create_child(f, SubRegion::TopLeft),
             self.create_child(f, SubRegion::TopRight),
             self.create_child(f, SubRegion::BottomLeft),
             self.create_child(f, SubRegion::BottomRight),
-        ])
+        ]
     }
 
     // * The iterative algorithm as presented in the paper does not easily work in Rust
@@ -107,7 +107,7 @@ impl QuadPoint {
             width: 1.0,
             depth: 0,
             image: f((x, y)),
-            children: None,
+            children: Vec::new(),
         };
         root.divide_rec(f, 0, config);
         root
@@ -128,37 +128,27 @@ impl QuadPoint {
             if depth < config.min_depth || variance_sq(&children[..]) > config.variance_sq_threshold
             {
                 for child in children.iter_mut() {
-                    //if child.is_in_band(f, config.band_threshold) {
                     child.divide_rec(f, depth + 1, config);
-                    //}
                 }
             }
-            self.children = Some(children);
+            self.children = children;
         }
     }
 
     pub fn each_leaf(&self, f: &mut impl FnMut(&QuadPoint)) {
-        match self.children {
-            Some(ref children) => {
-                for child in children.iter() {
-                    child.each_leaf(f);
-                }
+        if self.children.len() > 0 {
+            for child in self.children.iter() {
+                child.each_leaf(f);
             }
-            None => {
-                f(self);
-            }
+        } else {
+            f(self);
         }
     }
 
     pub fn each_node(&self, f: &mut impl FnMut(&QuadPoint)) {
         f(self);
-        match self.children {
-            Some(ref children) => {
-                for child in children.iter() {
-                    child.each_node(f);
-                }
-            }
-            None => {}
+        for child in self.children.iter() {
+            child.each_node(f);
         }
     }
 }
@@ -240,7 +230,7 @@ mod tests {
             width: 1.0,
             depth: 0,
             image: f((x, y)),
-            children: None,
+            children: Vec::new(),
         };
 
         // A quad point with no children has no variance (we cannot calculate it!)
@@ -259,7 +249,7 @@ mod tests {
         );
 
         // And as such, it will have a variance.
-        assert_eq!(Some(0.0), root.children().map(crate::variance_sq));
+        assert_eq!(0.0, crate::variance_sq(&root.children()));
     }
 
     #[test]
@@ -274,7 +264,7 @@ mod tests {
             width: 1.0,
             depth: 0,
             image: f((x, y)),
-            children: None,
+            children: Vec::new(),
         };
 
         // A quad point with no children has no variance (we cannot calculate it!)
@@ -294,7 +284,7 @@ mod tests {
 
         // And as such, it will have a variance.
         // mean = 0.5, variance**2 = 4 * (0.5**2) = 4 * 0.25 = 1
-        assert_eq!(Some(1.0), root.children().map(crate::variance_sq));
+        assert_eq!(1.0, crate::variance_sq(&root.children()));
     }
 
     fn analyse(
@@ -385,7 +375,7 @@ mod tests {
         let root = QuadPoint::division_and_initialization(&fns::zero, &config);
         assert!(!root.is_leaf());
         for i in 0..4 {
-            assert!(root.children.as_ref().unwrap()[i].is_leaf());
+            assert!(root.children()[i].is_leaf());
         }
     }
 }
