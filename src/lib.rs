@@ -6,6 +6,7 @@ pub struct Config {
     min_depth: usize,
     max_depth: usize,
     variance_sq_threshold: Num,
+    band_threshold: Num,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -108,13 +109,7 @@ impl QuadPoint {
             image: f((x, y)),
             children: None,
         };
-        root.divide_rec(
-            f,
-            0,
-            config.min_depth,
-            config.max_depth,
-            config.variance_sq_threshold,
-        );
+        root.divide_rec(f, 0, config);
         root
     }
 
@@ -123,18 +118,19 @@ impl QuadPoint {
         &mut self,
         f: &impl Fn((Num, Num)) -> Num,
         depth: usize,
-        min_depth: usize,
-        max_depth: usize,
-        variance_sq_threshold: Num,
+        config: &Config,
     ) {
         assert!(self.is_leaf());
-        debug_assert!(min_depth <= max_depth);
+        debug_assert!(config.min_depth <= config.max_depth);
 
-        if depth < max_depth {
+        if depth < config.max_depth {
             let mut children = self.create_children(f);
-            if depth < min_depth || variance_sq(&children[..]) >= variance_sq_threshold {
+            if depth < config.min_depth || variance_sq(&children[..]) > config.variance_sq_threshold
+            {
                 for child in children.iter_mut() {
-                    child.divide_rec(f, depth + 1, min_depth, max_depth, variance_sq_threshold);
+                    //if child.is_in_band(f, config.band_threshold) {
+                    child.divide_rec(f, depth + 1, config);
+                    //}
                 }
             }
             self.children = Some(children);
@@ -251,7 +247,16 @@ mod tests {
         assert!(root.is_leaf());
 
         // If we divide a quadpoint, the quadpoint will have children
-        root.divide_rec(&f, 0, 1, 1, 0.0);
+        root.divide_rec(
+            &f,
+            0,
+            &Config {
+                min_depth: 1,
+                max_depth: 1,
+                variance_sq_threshold: 0.0,
+                band_threshold: 0.0,
+            },
+        );
 
         // And as such, it will have a variance.
         assert_eq!(Some(0.0), root.children().map(crate::variance_sq));
@@ -276,7 +281,16 @@ mod tests {
         assert!(root.is_leaf());
 
         // If we divice a quadpoint, the quadpoint will have children
-        root.divide_rec(&f, 0, 1, 1, 0.0);
+        root.divide_rec(
+            &f,
+            0,
+            &Config {
+                min_depth: 1,
+                max_depth: 1,
+                variance_sq_threshold: 0.0,
+                band_threshold: 0.0,
+            },
+        );
 
         // And as such, it will have a variance.
         // mean = 0.5, variance**2 = 4 * (0.5**2) = 4 * 0.25 = 1
@@ -289,6 +303,7 @@ mod tests {
         min_depth: usize,
         max_depth: usize,
         variance_sq_threshold: f32,
+        band_threshold: f32,
     ) {
         use crate::QuadPoint;
         use splot::{Canvas, ColorPalette, Surface2};
@@ -301,6 +316,7 @@ mod tests {
             min_depth,
             max_depth,
             variance_sq_threshold,
+            band_threshold,
         };
         let root = QuadPoint::division_and_initialization(&f, &config);
         let transformation = canvas.make_transformation(&(-1.0..=1.0), &(-1.0..=1.0));
@@ -327,27 +343,34 @@ mod tests {
 
     #[test]
     fn test_circle() {
-        analyse(fns::circle, "circle.png", 2, 8, 0.1);
+        analyse(fns::circle, "circle.png", 2, 8, 0.1, 0.0);
     }
 
     #[test]
     fn test_another() {
-        analyse(fns::another, "another.png", 2, 6, 0.1);
+        analyse(fns::another, "another.png", 2, 6, 0.1, 0.1);
     }
 
     #[test]
     fn test_figure_c() {
-        analyse(fns::figure_c, "figure_c.png", 2, 8, 0.1);
+        analyse(fns::figure_c, "figure_c.png", 2, 8, 0.1, 0.1);
     }
 
     #[test]
     fn test_figure_e() {
-        analyse(fns::figure_e, "figure_e.png", 2, 8, 0.1);
+        analyse(fns::figure_e, "figure_e.png", 2, 8, 0.1, 0.1);
     }
 
     #[test]
     fn test_four_squares_diag() {
-        analyse(fns::four_squares_diag, "four_squares_diag.png", 0, 2, 0.0);
+        analyse(
+            fns::four_squares_diag,
+            "four_squares_diag.png",
+            0,
+            2,
+            0.0,
+            0.1,
+        );
     }
 
     #[test]
@@ -357,6 +380,7 @@ mod tests {
             min_depth: 1,
             max_depth: 1,
             variance_sq_threshold: 1.0,
+            band_threshold: 0.0,
         };
         let root = QuadPoint::division_and_initialization(&fns::zero, &config);
         assert!(!root.is_leaf());
