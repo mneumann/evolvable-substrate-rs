@@ -124,14 +124,14 @@ impl QuadPoint {
         debug_assert!(config.min_depth <= config.max_depth);
 
         if depth < config.max_depth {
-            let mut children = self.create_children(f);
-            if depth < config.min_depth || variance_sq(&children[..]) > config.variance_sq_threshold
+            self.children = self.create_children(f);
+            if depth < config.min_depth
+                || variance_sq(self.children()) > config.variance_sq_threshold
             {
-                for child in children.iter_mut() {
+                for child in self.children.iter_mut() {
                     child.divide_rec(f, depth + 1, config);
                 }
             }
-            self.children = children;
         }
     }
 
