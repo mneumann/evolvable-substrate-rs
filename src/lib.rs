@@ -6,7 +6,6 @@ pub struct Config {
     min_depth: usize,
     max_depth: usize,
     variance_sq_threshold: Num,
-    band_threshold: Num,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -34,7 +33,6 @@ pub struct QuadPoint {
 
 /// Returns the variance^2.
 fn variance_sq(children: &[QuadPoint]) -> Num {
-    assert!(!children.is_empty());
     let mean = children.iter().map(|c| c.image).sum::<Num>() / children.len() as Num;
     children.iter().map(|c| c.image - mean).map(|d| d * d).sum()
 }
@@ -53,7 +51,12 @@ impl QuadPoint {
     }
 
     pub fn is_leaf(&self) -> bool {
-        self.children.len() == 0
+        self.children.is_empty()
+    }
+
+    /// Returns Infinity if children is empty
+    pub fn variance_sq(&self) -> Num {
+        variance_sq(self.children())
     }
 
     /// Creates a child QuadPoint for the given SubRegion
@@ -113,6 +116,42 @@ impl QuadPoint {
         root
     }
 
+    fn is_in_horizontal_band(
+        &self,
+        width: Num,
+        f: &impl Fn((Num, Num)) -> Num,
+        band_threshold: Num,
+    ) -> bool {
+        let image_left = f((self.center.x - width, self.center.y));
+        let image_right = f((self.center.x + width, self.center.y));
+
+        let d_left = (self.image - image_left).abs();
+        let d_right = (self.image - image_right).abs();
+
+        d_left >= band_threshold && d_right >= band_threshold
+    }
+
+    fn is_in_vertical_band(
+        &self,
+        width: Num,
+        f: &impl Fn((Num, Num)) -> Num,
+        band_threshold: Num,
+    ) -> bool {
+        let image_top = f((self.center.x, self.center.y - width));
+        let image_bottom = f((self.center.x, self.center.y + width));
+
+        let d_top = (self.image - image_top).abs();
+        let d_bottom = (self.image - image_bottom).abs();
+
+        d_top >= band_threshold && d_bottom >= band_threshold
+    }
+
+    fn is_in_band(&self, f: &impl Fn((Num, Num)) -> Num, band_threshold: Num) -> bool {
+        let width_of_square = self.width * 2.0; // the square has 2-times the width.
+        self.is_in_horizontal_band(width_of_square, f, band_threshold)
+            || self.is_in_vertical_band(width_of_square, f, band_threshold)
+    }
+
     /// Recursively divide this node and child nodes.
     pub(crate) fn divide_rec(
         &mut self,
@@ -125,9 +164,7 @@ impl QuadPoint {
 
         if depth < config.max_depth {
             self.children = self.create_children(f);
-            if depth < config.min_depth
-                || variance_sq(self.children()) > config.variance_sq_threshold
-            {
+            if depth < config.min_depth || self.variance_sq() > config.variance_sq_threshold {
                 for child in self.children.iter_mut() {
                     child.divide_rec(f, depth + 1, config);
                 }
@@ -135,13 +172,46 @@ impl QuadPoint {
         }
     }
 
+    /// Function `select_band_pruned_candidates` has the same basic functionality as
+    /// `PruningAndExtraction` from the ES-HyperNEAT paper except that we do not construct
+    /// connections here (this can be done within the `select_callback`.
+    ///
+    /// We want to select those nodes that are enclosed within a "band". For this purpose we either
+    /// test leaf nodes or nodes with a low enough variance (< variance_sq_threshold) whether they
+    /// are enclosed within a band. If this condition is met, we call the `select_callback`.
+    pub fn select_band_pruned_candidates(
+        &self,
+        f: &impl Fn((Num, Num)) -> Num,
+        variance_sq_threshold: Num,
+        band_threshold: Num,
+        select_callback: &mut impl FnMut(&QuadPoint),
+    ) {
+        for child in self.children.iter() {
+            if child.children.is_empty() || child.variance_sq() < variance_sq_threshold {
+                // we look at all points that are either a leaf of where the variance is below a threshold (low variance).
+                // for those points, we select those that are located within a "band".
+                let is_candidate = child.is_in_band(f, band_threshold);
+                if is_candidate {
+                    select_callback(child);
+                }
+            } else {
+                child.select_band_pruned_candidates(
+                    f,
+                    variance_sq_threshold,
+                    band_threshold,
+                    select_callback,
+                );
+            }
+        }
+    }
+
     pub fn each_leaf(&self, f: &mut impl FnMut(&QuadPoint)) {
-        if self.children.len() > 0 {
+        if self.children.is_empty() {
+            f(self);
+        } else {
             for child in self.children.iter() {
                 child.each_leaf(f);
             }
-        } else {
-            f(self);
         }
     }
 
@@ -244,7 +314,6 @@ mod tests {
                 min_depth: 1,
                 max_depth: 1,
                 variance_sq_threshold: 0.0,
-                band_threshold: 0.0,
             },
         );
 
@@ -278,7 +347,6 @@ mod tests {
                 min_depth: 1,
                 max_depth: 1,
                 variance_sq_threshold: 0.0,
-                band_threshold: 0.0,
             },
         );
 
@@ -293,7 +361,9 @@ mod tests {
         min_depth: usize,
         max_depth: usize,
         variance_sq_threshold: f32,
+        prune_variance_sq_threshold: f32,
         band_threshold: f32,
+        prune: bool,
     ) {
         use crate::QuadPoint;
         use splot::{Canvas, ColorPalette, Surface2};
@@ -306,13 +376,14 @@ mod tests {
             min_depth,
             max_depth,
             variance_sq_threshold,
-            band_threshold,
         };
         let root = QuadPoint::division_and_initialization(&f, &config);
+
         let transformation = canvas.make_transformation(&(-1.0..=1.0), &(-1.0..=1.0));
 
-        root.each_leaf(&mut |qp| {
+        let draw = &mut |qp: &QuadPoint| {
             let center = transformation.image_to_raster(qp.center.x, qp.center.y);
+
             let x1 = qp.center.x - qp.width;
             let y1 = qp.center.y - qp.width;
             let x2 = qp.center.x + qp.width;
@@ -320,35 +391,85 @@ mod tests {
             let r1 = transformation.image_to_raster(x1, y1);
             let r2 = transformation.image_to_raster(x2, y2);
             let w = r2.0 - r1.0;
-            canvas.draw_filled_circle(
-                center.0,
-                center.1,
-                (max_depth + 2) as u32 - qp.depth as u32,
-                (255, 0, 0).into(),
-            );
+            let color = (255, 0, 0);
+
+            let radius = (max_depth + 2) as u32 - qp.depth as u32;
+            canvas.draw_filled_circle(center.0, center.1, radius, color.into());
+
             canvas.draw_square(r1.0, r1.1, w, (255, 0, 0).into());
-        });
+        };
+
+        if prune {
+            root.select_band_pruned_candidates(
+                &f,
+                prune_variance_sq_threshold,
+                band_threshold,
+                draw,
+            );
+        } else {
+            root.each_leaf(draw);
+        }
+
         canvas.image().save(name).unwrap();
     }
 
     #[test]
     fn test_circle() {
-        analyse(fns::circle, "circle.png", 2, 8, 0.1, 0.0);
+        analyse(
+            fns::circle,
+            "circle.png",
+            3,
+            7,
+            0.2 * 0.2,
+            0.2 * 0.2,
+            0.5,
+            false,
+        );
+        analyse(
+            fns::circle,
+            "circle_prune.png",
+            3,
+            7,
+            0.2 * 0.2,
+            0.1 * 0.1,
+            0.9,
+            true,
+        );
     }
 
     #[test]
     fn test_another() {
-        analyse(fns::another, "another.png", 2, 6, 0.1, 0.1);
+        analyse(fns::another, "another.png", 2, 6, 0.1, 0.5, 0.01, false);
+        analyse(fns::another, "another_prune.png", 2, 6, 0.1, 0.5, 0.1, true);
     }
 
     #[test]
     fn test_figure_c() {
-        analyse(fns::figure_c, "figure_c.png", 2, 8, 0.1, 0.1);
+        analyse(fns::figure_c, "figure_c.png", 2, 8, 0.1, 0.05, 0.1, false);
     }
 
     #[test]
     fn test_figure_e() {
-        analyse(fns::figure_e, "figure_e.png", 2, 8, 0.1, 0.1);
+        analyse(
+            fns::figure_e,
+            "figure_e.png",
+            2,
+            8,
+            0.2 * 0.2,
+            0.4 * 0.4,
+            0.1,
+            false,
+        );
+        analyse(
+            fns::figure_e,
+            "figure_e_prune.png",
+            2,
+            8,
+            0.2 * 0.2,
+            0.1 * 0.1,
+            0.04,
+            true,
+        );
     }
 
     #[test]
@@ -359,7 +480,9 @@ mod tests {
             0,
             2,
             0.0,
+            0.0,
             0.1,
+            false,
         );
     }
 
@@ -370,7 +493,6 @@ mod tests {
             min_depth: 1,
             max_depth: 1,
             variance_sq_threshold: 1.0,
-            band_threshold: 0.0,
         };
         let root = QuadPoint::division_and_initialization(&fns::zero, &config);
         assert!(!root.is_leaf());
