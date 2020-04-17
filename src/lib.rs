@@ -1,3 +1,6 @@
+use nalgebra::base::Vector2;
+pub use nalgebra::geometry::Point2;
+
 /// The floating-point type used throughout the code
 type Num = f32;
 
@@ -8,18 +11,12 @@ pub struct Config {
     variance_sq_threshold: Num,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Point2d<T> {
-    x: T,
-    y: T,
-}
-
 /// A QuadPoint is a quadratic region in 2d-space. It can further be divided into four sub-regions
 /// (`children`).
 #[derive(Debug)]
 pub struct QuadPoint {
     /// The coordinates of the center point.
-    center: Point2d<Num>,
+    center: Point2<Num>,
     /// The distance from the center to the top/bottom and left/right borders.
     /// The width of the region covered by this QuadPoint is 2-times as much.
     width: Num,
@@ -37,12 +34,20 @@ fn variance_sq(children: &[QuadPoint]) -> Num {
     children.iter().map(|c| c.image - mean).map(|d| d * d).sum()
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum SubRegion {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
+fn top_left() -> Vector2<Num> {
+    Vector2::new(-1.0, -1.0)
+}
+
+fn top_right() -> Vector2<Num> {
+    Vector2::new(1.0, -1.0)
+}
+
+fn bottom_left() -> Vector2<Num> {
+    Vector2::new(-1.0, 1.0)
+}
+
+fn bottom_right() -> Vector2<Num> {
+    Vector2::new(1.0, 1.0)
 }
 
 impl QuadPoint {
@@ -59,34 +64,26 @@ impl QuadPoint {
         variance_sq(self.children())
     }
 
-    /// Creates a child QuadPoint for the given SubRegion
-    fn create_child(&self, f: &impl Fn((Num, Num)) -> Num, sub_region: SubRegion) -> Self {
-        let (x_dir, y_dir) = match sub_region {
-            SubRegion::TopLeft => (-1.0, -1.0),
-            SubRegion::TopRight => (1.0, -1.0),
-            SubRegion::BottomLeft => (-1.0, 1.0),
-            SubRegion::BottomRight => (1.0, 1.0),
-        };
-
+    /// Creates a child QuadPoint for the given subregion
+    fn create_child(&self, f: &impl Fn(Point2<Num>) -> Num, sub_region: Vector2<Num>) -> Self {
         let half_width = self.width / 2.0;
-        let x = self.center.x + (x_dir * half_width);
-        let y = self.center.y + (y_dir * half_width);
+        let center = self.center + (sub_region * half_width);
         Self {
-            center: Point2d { x, y },
+            center,
             width: half_width,
             depth: self.depth + 1,
-            image: f((x, y)),
+            image: f(center),
             children: Vec::new(),
         }
     }
 
     /// Creates four children, one for each SubRegion.
-    fn create_children(&self, f: &impl Fn((Num, Num)) -> Num) -> Vec<QuadPoint> {
+    fn create_children(&self, f: &impl Fn(Point2<Num>) -> Num) -> Vec<QuadPoint> {
         vec![
-            self.create_child(f, SubRegion::TopLeft),
-            self.create_child(f, SubRegion::TopRight),
-            self.create_child(f, SubRegion::BottomLeft),
-            self.create_child(f, SubRegion::BottomRight),
+            self.create_child(f, top_left()),
+            self.create_child(f, top_right()),
+            self.create_child(f, bottom_left()),
+            self.create_child(f, bottom_right()),
         ]
     }
 
@@ -100,16 +97,15 @@ impl QuadPoint {
     //       f(x, y) = outgoing ? cppn(a, b, x, y) : cppn(x, y, a, b)
     //
     pub fn division_and_initialization(
-        f: &impl Fn((Num, Num)) -> Num,
+        f: &impl Fn(Point2<Num>) -> Num,
         config: &Config,
     ) -> QuadPoint {
-        let x = 0.0;
-        let y = 0.0;
+        let center = Point2::new(0.0, 0.0);
         let mut root = QuadPoint {
-            center: Point2d { x, y },
+            center,
             width: 1.0,
             depth: 0,
-            image: f((x, y)),
+            image: f(center),
             children: Vec::new(),
         };
         root.divide_rec(f, 0, config);
@@ -119,11 +115,11 @@ impl QuadPoint {
     fn is_in_horizontal_band(
         &self,
         width: Num,
-        f: &impl Fn((Num, Num)) -> Num,
+        f: &impl Fn(Point2<Num>) -> Num,
         band_threshold: Num,
     ) -> bool {
-        let image_left = f((self.center.x - width, self.center.y));
-        let image_right = f((self.center.x + width, self.center.y));
+        let image_left = f(self.center + Vector2::new(-width, 0.0));
+        let image_right = f(self.center + Vector2::new(width, 0.0));
 
         let d_left = (self.image - image_left).abs();
         let d_right = (self.image - image_right).abs();
@@ -134,11 +130,11 @@ impl QuadPoint {
     fn is_in_vertical_band(
         &self,
         width: Num,
-        f: &impl Fn((Num, Num)) -> Num,
+        f: &impl Fn(Point2<Num>) -> Num,
         band_threshold: Num,
     ) -> bool {
-        let image_top = f((self.center.x, self.center.y - width));
-        let image_bottom = f((self.center.x, self.center.y + width));
+        let image_top = f(self.center + Vector2::new(0.0, -width));
+        let image_bottom = f(self.center + Vector2::new(0.0, width));
 
         let d_top = (self.image - image_top).abs();
         let d_bottom = (self.image - image_bottom).abs();
@@ -146,7 +142,7 @@ impl QuadPoint {
         d_top >= band_threshold && d_bottom >= band_threshold
     }
 
-    fn is_in_band(&self, f: &impl Fn((Num, Num)) -> Num, band_threshold: Num) -> bool {
+    fn is_in_band(&self, f: &impl Fn(Point2<Num>) -> Num, band_threshold: Num) -> bool {
         let width_of_square = self.width * 2.0; // the square has 2-times the width.
         self.is_in_horizontal_band(width_of_square, f, band_threshold)
             || self.is_in_vertical_band(width_of_square, f, band_threshold)
@@ -155,7 +151,7 @@ impl QuadPoint {
     /// Recursively divide this node and child nodes.
     pub(crate) fn divide_rec(
         &mut self,
-        f: &impl Fn((Num, Num)) -> Num,
+        f: &impl Fn(Point2<Num>) -> Num,
         depth: usize,
         config: &Config,
     ) {
@@ -181,7 +177,7 @@ impl QuadPoint {
     /// are enclosed within a band. If this condition is met, we call the `select_callback`.
     pub fn select_band_pruned_candidates(
         &self,
-        f: &impl Fn((Num, Num)) -> Num,
+        f: &impl Fn(Point2<Num>) -> Num,
         variance_sq_threshold: Num,
         band_threshold: Num,
         select_callback: &mut impl FnMut(&QuadPoint),
@@ -225,28 +221,28 @@ impl QuadPoint {
 
 #[cfg(test)]
 mod tests {
-    use crate::Config;
+    use crate::{Config, Point2};
 
     /// Some test image functions
     pub mod fns {
-        use crate::Num;
+        use crate::{Num, Point2};
 
         // Four squares where diagonal squares have the same color.
-        pub fn four_squares_diag((x, y): (Num, Num)) -> Num {
-            if x < 0.0 && y < 0.0 || x > 0.0 && y > 0.0 {
+        pub fn four_squares_diag(p: Point2<Num>) -> Num {
+            if p.x < 0.0 && p.y < 0.0 || p.x > 0.0 && p.y > 0.0 {
                 0.0
             } else {
                 1.0
             }
         }
 
-        pub fn zero((_x, _y): (Num, Num)) -> Num {
+        pub fn zero(_: Point2<Num>) -> Num {
             0.0
         }
 
         // A similar circular function as given in the ES paper
-        pub fn circle((x, y): (Num, Num)) -> Num {
-            let r = x * x + y * y;
+        pub fn circle(p: Point2<Num>) -> Num {
+            let r = p.x * p.x + p.y * p.y;
             if r > 0.88 {
                 0.0
             } else if r > 0.22 {
@@ -262,8 +258,8 @@ mod tests {
             }
         }
 
-        pub fn another((x, y): (Num, Num)) -> Num {
-            (20.0 * x).sin() * (20.0 * y).sin()
+        pub fn another(p: Point2<Num>) -> Num {
+            (20.0 * p.x).sin() * (20.0 * p.y).sin()
         }
 
         fn gauss(u: Num, x: Num) -> Num {
@@ -278,28 +274,27 @@ mod tests {
             }
         }
 
-        pub fn figure_c((x, y): (Num, Num)) -> Num {
-            gauss(y * 10.0, (10.0 * x).sin())
+        pub fn figure_c(p: Point2<Num>) -> Num {
+            gauss(p.y * 10.0, (10.0 * p.x).sin())
         }
 
-        pub fn figure_e((x, y): (Num, Num)) -> Num {
-            s(gauss(10.0 * y, (10.0 * x).sin())) + s(gauss(0.0, 10.0 * x) * ((10.0 * y).sin()))
+        pub fn figure_e(p: Point2<Num>) -> Num {
+            s(gauss(10.0 * p.y, (10.0 * p.x).sin()))
+                + s(gauss(0.0, 10.0 * p.x) * ((10.0 * p.y).sin()))
         }
-
     }
 
     #[test]
     fn test_variance_zero() {
-        use crate::{Point2d, QuadPoint};
+        use crate::{Point2, QuadPoint};
 
         let f = fns::zero;
-        let x = 0.0;
-        let y = 0.0;
+        let center = Point2::new(0.0, 0.0);
         let mut root = QuadPoint {
-            center: Point2d { x, y },
+            center,
             width: 1.0,
             depth: 0,
-            image: f((x, y)),
+            image: f(center),
             children: Vec::new(),
         };
 
@@ -323,16 +318,15 @@ mod tests {
 
     #[test]
     fn test_variance_four_squares_diag() {
-        use crate::{Point2d, QuadPoint};
+        use crate::{Point2, QuadPoint};
 
         let f = fns::four_squares_diag;
-        let x = 0.0;
-        let y = 0.0;
+        let center = Point2::new(0.0, 0.0);
         let mut root = QuadPoint {
-            center: Point2d { x, y },
+            center,
             width: 1.0,
             depth: 0,
-            image: f((x, y)),
+            image: f(center),
             children: Vec::new(),
         };
 
@@ -356,7 +350,7 @@ mod tests {
     }
 
     fn analyse(
-        f: impl Clone + Fn((f32, f32)) -> f32,
+        f: impl Clone + Fn(Point2<f32>) -> f32,
         name: &str,
         min_depth: usize,
         max_depth: usize,
@@ -367,7 +361,7 @@ mod tests {
     ) {
         use crate::QuadPoint;
         use splot::{Canvas, ColorPalette, Surface2};
-        let surface = Surface2::new(f.clone());
+        let surface = Surface2::new(|(x, y)| f(Point2::new(x, y)));
         let gray = ColorPalette::grayscale(256);
         let mut canvas = Canvas::new(1024, 1024);
         canvas.splot(&surface, &gray);
