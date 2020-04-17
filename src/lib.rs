@@ -4,32 +4,32 @@ pub use nalgebra::geometry::Point2;
 /// The floating-point type used throughout the code
 type Num = f32;
 
-/// Configuration that tells `division_and_initialization` when to further stop subdividing a QuadPoint.
+/// Configuration that tells `division_and_initialization` when to further stop subdividing a Region.
 pub struct Config {
     min_depth: usize,
     max_depth: usize,
     variance_sq_threshold: Num,
 }
 
-/// A QuadPoint is a quadratic region in 2d-space. It can further be divided into four sub-regions
+/// A quadratic region in 2d-space. It can further be divided into four sub-regions
 /// (`children`).
 #[derive(Debug)]
-pub struct QuadPoint {
+pub struct Region {
     /// The coordinates of the center point.
     center: Point2<Num>,
     /// The distance from the center to the top/bottom and left/right borders.
-    /// The width of the region covered by this QuadPoint is 2-times as much.
+    /// The width of the region covered by this Region is 2-times as much.
     width: Num,
     /// The depth of this node (number of edges between the root and this node).
     depth: usize,
     /// The image of the function at (center.x, center.y).
     image: Num,
-    /// Subdivisions of this QuadPoint.
-    children: Vec<QuadPoint>,
+    /// Subdivisions of this Region.
+    children: Vec<Region>,
 }
 
 /// Returns the variance^2.
-fn variance_sq(children: &[QuadPoint]) -> Num {
+fn variance_sq(children: &[Region]) -> Num {
     let mean = children.iter().map(|c| c.image).sum::<Num>() / children.len() as Num;
     children.iter().map(|c| c.image - mean).map(|d| d * d).sum()
 }
@@ -50,8 +50,8 @@ fn bottom_right() -> Vector2<Num> {
     Vector2::new(1.0, 1.0)
 }
 
-impl QuadPoint {
-    pub fn children(&self) -> &[QuadPoint] {
+impl Region {
+    pub fn children(&self) -> &[Region] {
         &self.children[..]
     }
 
@@ -64,7 +64,7 @@ impl QuadPoint {
         variance_sq(self.children())
     }
 
-    /// Creates a child QuadPoint for the given subregion
+    /// Creates a child Region for the given subregion
     fn create_child(&self, f: &impl Fn(Point2<Num>) -> Num, sub_region: Vector2<Num>) -> Self {
         let half_width = self.width / 2.0;
         let center = self.center + (sub_region * half_width);
@@ -77,8 +77,8 @@ impl QuadPoint {
         }
     }
 
-    /// Creates four children, one for each SubRegion.
-    fn create_children(&self, f: &impl Fn(Point2<Num>) -> Num) -> Vec<QuadPoint> {
+    /// Creates four children, one for each sub region.
+    fn create_children(&self, f: &impl Fn(Point2<Num>) -> Num) -> Vec<Region> {
         vec![
             self.create_child(f, top_left()),
             self.create_child(f, top_right()),
@@ -96,12 +96,9 @@ impl QuadPoint {
     //
     //       f(x, y) = outgoing ? cppn(a, b, x, y) : cppn(x, y, a, b)
     //
-    pub fn division_and_initialization(
-        f: &impl Fn(Point2<Num>) -> Num,
-        config: &Config,
-    ) -> QuadPoint {
+    pub fn division_and_initialization(f: &impl Fn(Point2<Num>) -> Num, config: &Config) -> Region {
         let center = Point2::new(0.0, 0.0);
-        let mut root = QuadPoint {
+        let mut root = Region {
             center,
             width: 1.0,
             depth: 0,
@@ -180,7 +177,7 @@ impl QuadPoint {
         f: &impl Fn(Point2<Num>) -> Num,
         variance_sq_threshold: Num,
         band_threshold: Num,
-        select_callback: &mut impl FnMut(&QuadPoint),
+        select_callback: &mut impl FnMut(&Region),
     ) {
         for child in self.children.iter() {
             if child.children.is_empty() || child.variance_sq() < variance_sq_threshold {
@@ -201,7 +198,7 @@ impl QuadPoint {
         }
     }
 
-    pub fn each_leaf(&self, f: &mut impl FnMut(&QuadPoint)) {
+    pub fn each_leaf(&self, f: &mut impl FnMut(&Region)) {
         if self.children.is_empty() {
             f(self);
         } else {
@@ -211,7 +208,7 @@ impl QuadPoint {
         }
     }
 
-    pub fn each_node(&self, f: &mut impl FnMut(&QuadPoint)) {
+    pub fn each_node(&self, f: &mut impl FnMut(&Region)) {
         f(self);
         for child in self.children.iter() {
             child.each_node(f);
@@ -286,11 +283,11 @@ mod tests {
 
     #[test]
     fn test_variance_zero() {
-        use crate::{Point2, QuadPoint};
+        use crate::{Point2, Region};
 
         let f = fns::zero;
         let center = Point2::new(0.0, 0.0);
-        let mut root = QuadPoint {
+        let mut root = Region {
             center,
             width: 1.0,
             depth: 0,
@@ -318,11 +315,11 @@ mod tests {
 
     #[test]
     fn test_variance_four_squares_diag() {
-        use crate::{Point2, QuadPoint};
+        use crate::{Point2, Region};
 
         let f = fns::four_squares_diag;
         let center = Point2::new(0.0, 0.0);
-        let mut root = QuadPoint {
+        let mut root = Region {
             center,
             width: 1.0,
             depth: 0,
@@ -359,7 +356,7 @@ mod tests {
         band_threshold: f32,
         prune: bool,
     ) {
-        use crate::QuadPoint;
+        use crate::Region;
         use splot::{Canvas, ColorPalette, Surface2};
         let surface = Surface2::new(|(x, y)| f(Point2::new(x, y)));
         let gray = ColorPalette::grayscale(256);
@@ -371,11 +368,11 @@ mod tests {
             max_depth,
             variance_sq_threshold,
         };
-        let root = QuadPoint::division_and_initialization(&f, &config);
+        let root = Region::division_and_initialization(&f, &config);
 
         let transformation = canvas.make_transformation(&(-1.0..=1.0), &(-1.0..=1.0));
 
-        let draw = &mut |qp: &QuadPoint| {
+        let draw = &mut |qp: &Region| {
             let center = transformation.image_to_raster(qp.center.x, qp.center.y);
 
             let x1 = qp.center.x - qp.width;
@@ -482,13 +479,13 @@ mod tests {
 
     #[test]
     fn division_and_initialization_should_stop_at_max_depth() {
-        use crate::QuadPoint;
+        use crate::Region;
         let config = Config {
             min_depth: 1,
             max_depth: 1,
             variance_sq_threshold: 1.0,
         };
-        let root = QuadPoint::division_and_initialization(&fns::zero, &config);
+        let root = Region::division_and_initialization(&fns::zero, &config);
         assert!(!root.is_leaf());
         for i in 0..4 {
             assert!(root.children()[i].is_leaf());
