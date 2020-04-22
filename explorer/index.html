@@ -1,0 +1,220 @@
+<html>
+<head>
+  <meta charset="UTF-8">
+</head>
+<body style="background-color: lightgray;">
+  <div style="position: absolute;">
+    <h1>Evolvable Substrate Explorer</h1>
+  </div>
+  <div style="width: 100%; height: 100%;">
+    <div style="margin: auto; width: 800px; height: 800px; position: relative; top: 50%; -webkit-transform: translateY(-50%); -ms-transform: translateY(-50%); transform: translateY(-50%);">
+      <canvas style="border-radius: 5px; border-shadow: 2px; border: 2px solid darkgray;" width="800" height="800" id="canvas"></canvas>
+    </div>
+
+    <form style="position: absolute; top: 100px; left: 20px;">
+        <p>
+        <label for="function">Figure: </label>
+        <select id="function" value="figure_e" onchange="javascript: redraw()">
+          <option value="zero">Zero</option>
+          <option value="circle">Circle</option>
+          <option value="four_squares_diag">Four squares diagonal</option>
+          <option value="sin_cos_pattern">Sin/Cos Pattern</option>
+          <option value="figure_c">Figure c</option>
+          <option value="figure_e">Figure e</option>
+          <option value="your_own">Your own (below)</option>
+        </select>
+
+        <!--  -->
+        <p>
+        <label for="your_own_function">Your own function:</label>
+        <p>
+        <input size="50" type="text" id="your_own_function" value="(x,y) => Math.sin(20*(Math.cos(y))) + Math.sin(20 * Math.cos(x))" oninput="redraw()">
+
+        <p>
+        <label for="min_depth">Min depth: </label>
+        <input type="number" id="min_depth" min="0" max="10" name="min_depth" value="3" onchange="redraw()">
+
+        <p>
+        <label for="max_depth">Max depth: </label>
+        <input type="number" id="max_depth" min="0" max="10" name="max_depth" value="7" onchange="redraw()">
+
+        <p>
+        <label for="variance_threshold">Variance Threshold: (in %)</label>
+        <input type="number" id="variance_threshold" min="0" max="1000" step="1" name="variance_threshold" value="20" onchange="redraw()">
+        <div style="width: 400px">
+        (below which we no longer sub divide, as information is too low. high variance means high information)
+        </div>
+
+        <p>
+        <input type="checkbox" id="clip01" value="ON" onchange="redraw() "/>
+        <label for="clip01">Clip function values into range [0, 1]</label>
+
+        <p>
+        <input type="checkbox" checked id="show_function" value="ON" onchange="redraw()" />
+        <label for="show_function">Show function</label>
+
+        <p>
+        <input type="checkbox" checked id="show_regions" value="ON" onchange="redraw()" />
+        <label for="show_regions">Show regions</label>
+
+        <p>
+        <input type="checkbox" checked id="show_center" value="ON" onchange="redraw() "/>
+        <label for="show_center">Show center points</label>
+
+        <p>
+        <label for="show_from_depth">Show from depth: </label>
+        <input type="number" id="show_from_depth" min="0" max="10" name="show_from_depth" value="0" onchange="redraw()">
+
+        <p>
+        <button onclick="redraw()">Redraw</button>
+    </form>
+  </div>
+  <script src="evolvable_substrate.js"></script>
+
+  <script type="text/javascript">
+
+    function redraw(ev) {
+        if (event) event.preventDefault();
+        if (ev) ev.preventDefault();
+        var canvas =  document.getElementById("canvas")
+
+        var fn = document.getElementById("function").value;
+        var f = null;
+
+        if (fn === 'your_own') {
+           let elm = document.getElementById("your_own_function")
+           try {
+               let f1 = eval(elm.value);
+               let i = f1(0,0);
+               if (typeof(i) === 'number') {
+                 f = ({x,y}) => f1(x,y);
+               } else {
+                 throw "not a number";
+               }
+               elm.style.color = "";
+           } catch (ex) {
+               elm.style.color = "red";
+               return;
+           }
+        } else {
+           f = functions()[fn];
+        }
+
+        let clip01 = document.getElementById("clip01").checked;
+
+        if (clip01) {
+           f = make_clip01(f);
+        }
+
+        let variance_threshold = parseInt(document.getElementById("variance_threshold").value) / 100.0;
+        let min_depth = parseInt(document.getElementById("min_depth").value);
+        let max_depth = parseInt(document.getElementById("max_depth").value);
+
+        if (min_depth > max_depth) {
+                max_depth = min_depth;
+                document.getElementById("max_depth").value = min_depth.toString();
+        }
+
+        let show_regions = document.getElementById("show_regions").checked;
+        let show_center = document.getElementById("show_center").checked;
+        let show_function = document.getElementById("show_function").checked;
+        let show_from_depth = parseInt(document.getElementById("show_from_depth").value);
+
+        let config = {
+          min_depth,
+          max_depth,
+          variance_threshold: variance_threshold,
+          f,
+          show_function,
+          show_regions,
+          show_center,
+          show_from_depth
+        };
+        console.log(config);
+
+        draw(canvas, config);
+    }
+
+    function clip01(z) {
+        if (z > 1.0) return 1.0;
+        if (z < 0.0) return 0.0;
+        return z;
+    }
+
+    function make_clip01(f) {
+        return function(xy) { return clip01(f(xy)); };
+    }
+
+
+    async function draw(canvas, config) {
+      var ctx = canvas.getContext("2d");
+      ctx.save();
+
+      let f = config.f;
+
+      let plot = plot_function({
+        raster_width: 400,
+        raster_height: 400,
+        f,
+        xrange: {min: -1.0, max: 1.0},
+        yrange: {min: -1.0, max: 1.0}
+      });
+  
+      if (config.show_function) {
+        let image_data = toImageData(plot);
+        let bmp = await createImageBitmap(image_data);
+        ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.fillStyle = 'darkgray';
+        ctx.fillRect(0,0,canvas.width, canvas.height);
+      }
+
+      ctx.scale(2.0, 2.0);
+      let root_region = DivideAndInitialize(config); 
+
+        if (config.show_center || config.show_regions) {
+          eachLeafRegion(root_region, function (leaf) {
+            if (leaf.depth < config.show_from_depth) return;
+
+            let p1 = plot.image_to_raster({
+              x: leaf.center.x - leaf.width,
+              y: leaf.center.y - leaf.width
+            });
+            let p2 = plot.image_to_raster({
+              x: leaf.center.x + leaf.width,
+              y: leaf.center.y + leaf.width
+            });
+            let width  = p2.x - p1.x;
+            let height = p2.y - p1.y;
+            let center = plot.image_to_raster(leaf.center);
+            let radius = 0.5 * 0.25 * (12 - leaf.depth);
+
+            const red = '#FF0000';
+            const green = '#00FF00';
+
+            if (config.show_regions) {
+              ctx.beginPath();
+              ctx.rect(p1.x, p1.y, width, height);
+              ctx.lineWidth = 0.25;
+              ctx.strokeStyle = green;
+              ctx.stroke();
+            }
+
+            if (config.show_center) {
+              ctx.beginPath();
+              ctx.arc(center.x, center.y, radius, 0, 2 * Math.PI, false);
+              ctx.fillStyle = red;
+              ctx.fill();
+            }
+          });
+        }
+        ctx.restore();
+    }
+
+
+    document.addEventListener("DOMContentLoaded", function(e) {
+        redraw();
+    });
+  </script>
+</body>
+</html>
