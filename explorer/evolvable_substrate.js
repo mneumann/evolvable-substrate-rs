@@ -27,14 +27,14 @@ function divide_region(region, config) {
   let children = config.deltas.map(delta => create_child_region(region, delta, config.f));
   // v determines how much the image values vary across the child regions.
   // if there is a high variance, there is high information and we want to further sub divide.
-  let v = variance(children);
+  region.variance = variance(children);
    //console.log(v);
 
   if (region.depth < config.max_depth) {
         if (region.depth < config.min_depth) {
           region.children = children;
         }
-        if (v >= config.variance_threshold) {
+        if (region.variance >= config.variance_threshold) {
           region.children = children;
         }
   }
@@ -104,6 +104,80 @@ function divide_and_initialize(config) {
 }
 
 window.DivideAndInitialize = divide_and_initialize;
+
+
+function add_scaled_point(p1, p2, scale) {
+   return {
+        x: p1.x + scale * p2.x,
+        y: p1.y + scale * p2.y
+   };
+}
+
+function is_in_linear_band(region, vector, config)
+{
+  let image_left = config.f(add_scaled_point(region.center, vector, -1.0))
+  let image_right = config.f(add_scaled_point(region.center, vector, 1.0))
+  let d_left = Math.abs(region.image - image_left)
+  let d_right = Math.abs(region.image - image_right)
+
+  return (d_left >= config.band_threshold && d_right >= config.band_threshold);
+}
+
+
+
+function is_in_horizontal_band(region, width, config)
+{
+  return is_in_linear_band(region, {x: width, y: 0}, config); 
+}
+
+function is_in_vertical_band(region, width, config)
+{
+  return is_in_linear_band(region, {x: 0, y: width}, config); 
+}
+
+function is_in_band(region, config) {
+  let width_of_square = region.width * 2.0; // the square has 2-times the width.
+  return (is_in_horizontal_band(region, width_of_square, config)
+            || is_in_vertical_band(region, width_of_square, config))
+}
+
+/// Function `select_band_pruned_candidates` has the same basic functionality as
+/// `PruningAndExtraction` from the ES-HyperNEAT paper except that we do not construct
+/// connections here (this can be done within the `select_callback`.
+///
+/// We want to select those nodes that are enclosed within a "band". For this purpose we either
+/// test leaf nodes or nodes with a low enough variance (< variance_sq_threshold) whether they
+/// are enclosed within a band. If this condition is met, we call the `select_callback`.
+function select_band_pruned_candidates(root_region, config, select_callback) {
+  let stack = [root_region];
+
+   while (true) {
+     let region = stack.pop();
+     if (!region) {
+       break;
+     }
+
+     // we look at all points that are either a leaf or where the variance is below a threshold (low variance).
+     // for those points, we select those that are located within a "band".
+
+     if (region.children) {
+         if (region.variance < config.variance_threshold && is_in_band(region, config)) {
+            select_callback(region);
+         }
+
+        stack.push(...region.children);
+     } else {
+        // leaf
+        if (is_in_band(region, config)) {
+                select_callback(region);
+        }
+     }
+  }
+}
+
+window.select_band_pruned_candidates = select_band_pruned_candidates;
+
+
 
 // ------------------------------------
 // Plotting support

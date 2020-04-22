@@ -46,6 +46,10 @@
         </div>
 
         <p>
+        <label for="band_threshold">Band Threshold: (in %)</label>
+        <input type="number" id="band_threshold" min="0" max="1000" step="1" name="band_threshold" value="20" onchange="redraw()">
+
+        <p>
         <input type="checkbox" id="clip01" value="ON" onchange="redraw() "/>
         <label for="clip01">Clip function values into range [0, 1]</label>
 
@@ -60,6 +64,10 @@
         <p>
         <input type="checkbox" checked id="show_center" value="ON" onchange="redraw() "/>
         <label for="show_center">Show center points</label>
+
+        <p>
+        <input type="checkbox" checked id="show_band_pruned" value="ON" onchange="redraw() "/>
+        <label for="show_band_pruned">Show band-pruned regions</label>
 
         <p>
         <label for="show_from_depth">Show from depth: </label>
@@ -107,6 +115,7 @@
         }
 
         let variance_threshold = parseInt(document.getElementById("variance_threshold").value) / 100.0;
+        let band_threshold = parseInt(document.getElementById("band_threshold").value) / 100.0;
         let min_depth = parseInt(document.getElementById("min_depth").value);
         let max_depth = parseInt(document.getElementById("max_depth").value);
 
@@ -118,16 +127,19 @@
         let show_regions = document.getElementById("show_regions").checked;
         let show_center = document.getElementById("show_center").checked;
         let show_function = document.getElementById("show_function").checked;
+        let show_band_pruned = document.getElementById("show_band_pruned").checked;
         let show_from_depth = parseInt(document.getElementById("show_from_depth").value);
 
         let config = {
           min_depth,
           max_depth,
-          variance_threshold: variance_threshold,
+          variance_threshold,
+          band_threshold,
           f,
           show_function,
           show_regions,
           show_center,
+          show_band_pruned,
           show_from_depth
         };
         console.log(config);
@@ -172,41 +184,50 @@
       ctx.scale(2.0, 2.0);
       let root_region = DivideAndInitialize(config); 
 
-        if (config.show_center || config.show_regions) {
-          eachLeafRegion(root_region, function (leaf) {
-            if (leaf.depth < config.show_from_depth) return;
+      let draw_node = function (node, color_center, color_region) {
+            if (node.depth < config.show_from_depth) return;
 
             let p1 = plot.image_to_raster({
-              x: leaf.center.x - leaf.width,
-              y: leaf.center.y - leaf.width
+              x: node.center.x - node.width,
+              y: node.center.y - node.width
             });
             let p2 = plot.image_to_raster({
-              x: leaf.center.x + leaf.width,
-              y: leaf.center.y + leaf.width
+              x: node.center.x + node.width,
+              y: node.center.y + node.width
             });
             let width  = p2.x - p1.x;
             let height = p2.y - p1.y;
-            let center = plot.image_to_raster(leaf.center);
-            let radius = 0.5 * 0.25 * (12 - leaf.depth);
-
-            const red = '#FF0000';
-            const green = '#00FF00';
+            let center = plot.image_to_raster(node.center);
+            let radius = 0.5 * 0.25 * (12 - node.depth);
 
             if (config.show_regions) {
               ctx.beginPath();
               ctx.rect(p1.x, p1.y, width, height);
               ctx.lineWidth = 0.25;
-              ctx.strokeStyle = green;
+              ctx.strokeStyle = color_region;
               ctx.stroke();
             }
 
             if (config.show_center) {
               ctx.beginPath();
               ctx.arc(center.x, center.y, radius, 0, 2 * Math.PI, false);
-              ctx.fillStyle = red;
+              ctx.fillStyle = color_center;
               ctx.fill();
             }
-          });
+          };
+
+      const red = '#FF0000';
+      const green = '#00FF00';
+
+
+
+        if (config.show_center || config.show_regions) {
+
+            if (config.show_band_pruned) {
+              select_band_pruned_candidates(root_region, config, node => draw_node(node, red, green));
+            } else {
+              eachLeafRegion(root_region, leaf => draw_node(leaf, red, green));
+            }
         }
         ctx.restore();
     }
