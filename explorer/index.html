@@ -4,7 +4,7 @@
 </head>
 <body style="background-color: lightgray;">
   <div style="position: absolute;">
-    <h1>Evolvable Substrate Explorer</h1>
+    <h1>Evolvable Substrate Explorer (v0.1)</h1>
   </div>
   <div style="width: 100%; height: 100%;">
     <div style="margin: auto; width: 800px; height: 800px; position: relative; top: 50%; -webkit-transform: translateY(-50%); -ms-transform: translateY(-50%); transform: translateY(-50%);">
@@ -14,11 +14,11 @@
     <form style="position: absolute; top: 100px; left: 20px;">
         <p>
         <label for="function">Figure: </label>
-        <select id="function" value="figure_e" onchange="javascript: redraw()">
+        <select id="function" onchange="javascript: redraw()">
           <option value="zero">Zero</option>
           <option value="circle">Circle</option>
           <option value="four_squares_diag">Four squares diagonal</option>
-          <option value="sin_cos_pattern">Sin/Cos Pattern</option>
+          <option selected value="sin_cos_pattern">Sin/Cos Pattern</option>
           <option value="figure_c">Figure c</option>
           <option value="figure_e">Figure e</option>
           <option value="your_own">Your own (below)</option>
@@ -50,7 +50,7 @@
         <input type="number" id="band_threshold" min="0" max="1000" step="1" name="band_threshold" value="20" onchange="redraw()">
 
         <p>
-        <input type="checkbox" id="clip01" value="ON" onchange="redraw() "/>
+        <input type="checkbox" id="clip01" value="ON" checked onchange="redraw() "/>
         <label for="clip01">Clip function values into range [0, 1]</label>
 
         <p>
