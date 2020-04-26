@@ -256,6 +256,15 @@ function functions() {
     };
 }
 
+// Math.min(...splat) exceeds stack on Chrome
+function Array_min(ary) {
+  return ary.reduce((a, b) => Math.min(a,b), ary[0]);
+}
+
+function Array_max(ary) {
+  return ary.reduce((a, b) => Math.max(a,b), ary[0]);
+}
+
 function plot_function({raster_width, raster_height, f, xrange, yrange}) {
   let pixels = new Float32Array(raster_width * raster_height);
 
@@ -272,8 +281,8 @@ function plot_function({raster_width, raster_height, f, xrange, yrange}) {
       }
   }
 
-  let min = Math.min(...pixels);
-  let max = Math.max(...pixels);
+  let min = Array_min(pixels);
+  let max = Array_max(pixels);
 
   let normalize_zrange = make_transformation({input_domain: {min, max}, output_domain: {min: 0.0, max: 1.0}});
 
